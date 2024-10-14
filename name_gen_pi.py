@@ -49,9 +49,10 @@ names = {student: 0 for class_students in students.values() for student in class
 selected_class = list(students.keys())[0]
 current_class_index = 0
 
-# Set up socket for communication
+# Set up server socket to listen for connections
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server_socket.connect(('Veehaans-MacBook-Air.local', 1 ))  # Replace 'MAC_IP_ADDRESS' with your Mac's IP
+server_socket.bind(('0.0.0.0', 5001))  # Bind to all available interfaces, port 5001
+server_socket.listen(5)  # Listen for up to 5 incoming connections
 
 def wait_for_press(button_pin):
     while GPIO.input(button_pin) == GPIO.HIGH:
@@ -79,6 +80,7 @@ def display_on_lcd(line1, line2=""):
 
 try:
     while True:
+        # Display initial message to select class
         display_on_lcd("Select Class")
         
         while True:
@@ -96,11 +98,29 @@ try:
         display_on_lcd(f"Class {selected_class}", "Pick Name")
 
         while True:
+            # Check for client connections
+            client_socket, address = server_socket.accept()  # Accept the connection
+            print(f"Connection from {address}")
+
+            try:
+                # Receive the data
+                data = client_socket.recv(1024).decode()
+                if data:
+                    print(f"Received: {data}")
+                    # Process the received data (update display, etc.)
+                    first_name, class_name, times_called = data.split(',')
+                    display_on_lcd(f"Name: {first_name}", f"Called: {times_called}")
+                else:
+                    print("No data received.")
+            except Exception as e:
+                print(f"Error: {e}")
+            finally:
+                client_socket.close()  # Close the client socket
+
             if GPIO.input(BUTTON_PIN_1) == GPIO.LOW:
                 chosen_name = choose_name()
                 first_name = extract_first_name(chosen_name)
                 message = f"{first_name},{selected_class},{names[chosen_name]}"
-                server_socket.sendall(message.encode())
                 display_on_lcd(f"Name: {first_name}", f"Called: {names[chosen_name]}")
                 wait_for_press(BUTTON_PIN_1)
 
@@ -112,5 +132,3 @@ try:
 finally:
     server_socket.close()
     GPIO.cleanup()
-
-

@@ -1,9 +1,11 @@
-from PyQt6.QtWidgets import QApplication, QMainWindow, QComboBox, QWidget, QLineEdit
-from PyQt6.QtWidgets import QFrame, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QScrollArea
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPainter, QColor, QFont
+from PyQt6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget, QLineEdit
+from PyQt6.QtWidgets import QFrame, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QScrollArea, QComboBox
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
 import random
 import math
+import socket
+import time
 
 
 
@@ -11,20 +13,23 @@ class SpinnerWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.segment_colors = [
-            [QColor(0, 0, 255), QColor(255, 0, 0), QColor(0, 255, 0)],  
-            [QColor(255, 0, 0), QColor(0, 255, 0), QColor(0, 0, 255)], 
-            [QColor(0, 255, 0), QColor(0, 0, 255), QColor(255, 0, 0)],  
+            [QColor(229, 107, 111), QColor(255, 209, 102), QColor(202, 240, 248)],
+            [QColor(202, 240, 248), QColor(229, 107, 111), QColor(255, 209, 102)],
+            [QColor(255, 209, 102), QColor(202, 240, 248), QColor(229, 107, 111)]
         ]
         self.names = []
-        self.current_set_index = 0 
-        self.label_offset = 0      
+        self.current_set_index = 0
+        self.label_offset = 0
+        self.setFixedSize(500, 500)
+        self.slow = False
 
     def start_spinning(self):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_colors)
-        self.timer.start(100) 
+        self.timer.start(100)
 
     def stop_spinning(self):
+        self.slow = True
         self.timer.stop()
 
     def update_colors(self):
@@ -34,17 +39,27 @@ class SpinnerWidget(QWidget):
 
     def paintEvent(self, event):
         if not self.names:
+            # Draw empty spinner
+            painter.setBrush(QColor(200, 200, 200))  # Light grey color for the empty wheel
+            painter.drawEllipse(center_x - radius, center_y - radius, 2 * radius, 2 * radius)
+            
+            # Draw "No Names Available" text in the center
+            font = QFont("Arial", 20)
+            painter.setFont(font)
+            painter.setPen(Qt.GlobalColor.black)
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No Names Available")
             return
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        center_x, center_y = 150, 150
-        radius = 150
-
+        center_x, center_y = 250, 250
+        radius = 200
         sides = len(self.names)
-        angle = 360/sides
+        angle = 360 / sides
 
-        font = QFont("Arial", int(100/sides))
+        font_size = max(12, int(180 / sides))
+        font = QFont("Arial", font_size)
+        font.setWeight(QFont.Weight.Bold)
         painter.setFont(font)
 
         for i in range(sides):
@@ -53,72 +68,55 @@ class SpinnerWidget(QWidget):
             painter.setBrush(self.segment_colors[self.current_set_index][i % 3])
             painter.drawPie(center_x - radius, center_y - radius, 2 * radius, 2 * radius, start_angle, span_angle)
 
-            angle_rad = math.radians(angle * i + angle/2)
-            label_radius = radius * 0.6
+            angle_rad = math.radians(angle * i + angle / 2)
+            label_radius = radius * 0.7
             label_x = center_x + label_radius * math.cos(angle_rad)
             label_y = center_y - label_radius * math.sin(angle_rad)
 
             label_index = (i + self.label_offset) % len(self.names)
             painter.setPen(Qt.GlobalColor.black)
-            painter.drawText(int(label_x) - 20, int(label_y) + 10, self.names[label_index])
+            painter.save()
+            painter.translate(label_x, label_y)
+            painter.rotate(-angle * i - angle / 2)
+            painter.drawText(-30, 10, self.names[label_index])
+            painter.restore()
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.main_widget = QWidget()
-        self.HRectangle1 = QHBoxLayout()
-        self.VRectangle0 = QVBoxLayout()
-        self.VRectangle1 = QVBoxLayout()
-        self.VRectangle2 = QVBoxLayout()
-        self.HRectangle2 = QHBoxLayout()
-        self.HRectangle2b = QHBoxLayout()
-        self.VRectangle4 = QVBoxLayout()
+        self.HOST = '192.168.2.2'  # Raspberry Pi IP address
+        self.PORT = 12345          # Port number
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        self.block = ['a1:', 'a2:', 'a3:', 'a4:',
-                      'b1:', 'b2:', 'b3:', 'b4:']
+        try:
+            self.client_socket.connect((self.HOST, self.PORT))
+            print("Connected to Raspberry Pi")
+        except socket.error as e:
+            print(f"Socket error: {e}")
 
-        self.displayName = QLabel("(name)")
-        self.displayName.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.displayName.setStyleSheet('''background-color : #CE8989;
-                                        font-size : 50px;
-                                        color : black;''')
-        self.displayName.setFixedSize(300, 100)
+        # Set socket to non-blocking mode
+        self.client_socket.setblocking(False)
 
-        self.name = QLineEdit()
-        self.name.setPlaceholderText("Enter name...")
-        self.name.setFixedSize(400, 40)
-        self.name.setStyleSheet(''' background-color : white; color : black;
-                                        font-size : 16px;''')
-        self.removeName_button = QPushButton("Remove")
-        self.removeName_button.setFixedSize(120, 40)
-        self.removeName_button.setStyleSheet(''' background-color : #2196F3; color : black;
-                                        font-size : 14px;''')
-        self.removeName_button.clicked.connect(self.nameRemoval)
+        # Timer to check for incoming data periodically
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.receive_data)
+        self.timer.start(100)  # Check every 100ms
 
-        self.addName_button = QPushButton("Add")
-        self.addName_button.setFixedSize(90, 40)
-        self.addName_button.setStyleSheet(''' background-color : #2196F3; color : black;
-                                        font-size : 14px;''')
-        self.addName_button.clicked.connect(self.nameAdditon)
+        self.main_widget = QStackedWidget()
+        self.setCentralWidget(self.main_widget)
 
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.names = {'shreyas': '1', 'jackson': '3', 'hang': '4'}
+        # Create screen 1 (spinner and random name display)
+        self.screen1 = QWidget()
+        self.layout1 = QVBoxLayout()
+        self.layout2 = QHBoxLayout()
+        self.layout3 = QHBoxLayout()
 
-        self.scroll.setStyleSheet(''' background-color: #DEDEDE; color:black;font-size:30px''')
-        self.scroll_widget = QWidget()
-        self.scroll_layout = QVBoxLayout()
-        self.refreshScroll(self.names)
-        self.scroll_widget.setLayout(self.scroll_layout)
-        self.scroll.setWidget(self.scroll_widget)
+        # Center the layout
+        self.layout1.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.randomButton = QPushButton("Press for name!")
-        self.randomButton.setStyleSheet('''background-color : #CE8989;
-                                            font-size : 24px;''')
-        self.randomButton.setFixedSize(300, 100)
-        self.randomButton.clicked.connect(self.startSpinner)
+        self.spinner = SpinnerWidget()
+        self.spinner.setFixedSize(500, 500)  # Adjust the size to prevent overlap
 
         self.dropdown = QComboBox()
         self.dropdown.addItems(['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', 'B4'])
@@ -143,78 +141,151 @@ image : url('/Users/shreyas/Documents/Python/Work-in-progress projects/MATE grou
 }
 """)
         self.dropdown.currentIndexChanged.connect(self.readNames)
-        self.readNames()
 
-        self.spinner = SpinnerWidget()
-        self.spinner.setFixedSize(300, 300)
+        self.randomButton = QPushButton("Press for name!")
+        self.randomButton.setFixedSize(300, 100)
+        self.randomButton.setStyleSheet('background-color : #CE8989; font-size : 24px;')
+        self.randomButton.clicked.connect(self.startSpinner)
 
-        self.HRectangle1.addLayout(self.VRectangle1)
-        self.HRectangle1.addLayout(self.VRectangle0)
+        # Create a horizontal layout for the label and switch button
+        self.name_layout = QHBoxLayout()
+        self.displayName = QLabel("(name)")
+        self.displayName.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.displayName.setStyleSheet('background-color : #CE8989; font-size : 50px; color : black;')
+        self.displayName.setFixedSize(300, 100)
 
-        self.VRectangle0.addWidget(self.spinner)
-        self.VRectangle0.addWidget(self.randomButton)
-        self.VRectangle0.addWidget(self.displayName)
+        self.switchButton1 = QPushButton("Go to Data screen")
+        self.switchButton1.setFixedSize(150, 50)
+        self.switchButton1.setStyleSheet('background-color : #CE8989; font-size : 18px; border-radius: 10px;')
+        self.switchButton1.clicked.connect(self.show_screen2)
 
-        self.VRectangle1.addWidget(self.dropdown)
-        self.VRectangle1.addLayout(self.VRectangle2)
-        self.VRectangle1.setContentsMargins(60, 60, 25, 25)
+        # Add label and switch button to the horizontal layout
+        self.name_layout.addWidget(self.switchButton1, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.name_layout.addWidget(self.displayName, alignment=Qt.AlignmentFlag.AlignCenter)
+        #self.name_layout.addWidget(self.dropdown, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.name_layout.setSpacing(700)
+        self.name_layout.setContentsMargins(0,0,1260,0)
 
-        self.VRectangle2.addLayout(self.HRectangle2b)
-        self.VRectangle2.addLayout(self.HRectangle2)
 
-        self.HRectangle2b.addWidget(self.name)
-        self.HRectangle2b.addWidget(self.removeName_button)
-        self.HRectangle2b.addWidget(self.addName_button)
+        # Add widgets to the layout with spacing
+        self.layout1.addStretch()  # Add stretchable space before the widgets
+        
+        self.layout2.addWidget(self.dropdown, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.layout2.addWidget(self.spinner, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.layout2.setSpacing(350)
+        self.layout2.setContentsMargins(0,0,800,500)
+        self.layout1.addLayout(self.layout2)
+        
+        self.layout3.addWidget(self.randomButton, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.layout3.setContentsMargins(0,220, 0, 0)
+        self.layout1.addLayout(self.layout3)
+        
+        self.layout1.addWidget(self.dropdown, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.layout1.addLayout(self.name_layout)  # Add the horizontal layout to the main layout
+        #iself.layout1.addStretch()  # Add stretchable space after the widgets
+        self.layout1.setSpacing(0)
 
-        self.VRectangle2.addLayout(self.VRectangle4)
-        self.VRectangle4.addWidget(self.scroll)
 
-        self.main_widget.setLayout(self.HRectangle1)
-        self.setCentralWidget(self.main_widget)
+        self.screen1.setLayout(self.layout1)
+        self.main_widget.addWidget(self.screen1)
 
-    def nameAdditon(self):
-        name = self.name.text().title()
-        temp_names= {}
-        temp_names[name] = "0"
-        self.names.update(temp_names)
+        self.arrow = QLabel(self.screen1)
+        self.arrow.setPixmap(QPixmap("arrow2.png").scaled(50, 50, Qt.AspectRatioMode.KeepAspectRatio))
+        self.arrow.setFixedSize(50,50)
+        self.arrow.raise_()
+        self.arrow.setGeometry(830,200,50,50)
+
+
+        # Create screen 2 (name list, add/remove functionality)
+        self.screen2 = QWidget()
+        self.layout2 = QVBoxLayout()
+        self.scroll_layout = QVBoxLayout()
+
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("Enter name...")
+        self.name.setStyleSheet(''' background-color : white; color : black;
+                                        font-size : 16px;''')
+
+        self.addName_button = QPushButton("Add")
+        self.addName_button.setStyleSheet(''' background-color : #2196F3; color : black;
+                                        font-size : 14px;''')
+
+        self.removeName_button = QPushButton("Remove")
+        self.removeName_button.setStyleSheet(''' background-color : #2196F3; color : black;
+                                        font-size : 14px;''')
+
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet(''' background-color: #DEDEDE; color:black;font-size:30px''')
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_widget = QWidget()
+        self.scroll_widget.setLayout(self.scroll_layout)
+        self.scroll.setWidget(self.scroll_widget)
+        self.scroll_layout.addWidget(self.scroll_widget)
+
+        self.switchButton2 = QPushButton("Go to Spinner")
+        self.switchButton2.setFixedSize(150, 50)
+        self.switchButton2.setStyleSheet('background-color : #CE8989; font-size : 18px; border-radius: 10px;')
+
+        self.layout2.addWidget(self.name)
+        #self.layout2.addWidget(self.freq)
+        self.layout2.addWidget(self.addName_button)
+        self.layout2.addWidget(self.removeName_button)
+        self.layout2.addWidget(self.scroll)
+        self.layout2.addWidget(self.switchButton2)
+
+        self.screen2.setLayout(self.layout2)
+        self.main_widget.addWidget(self.screen2)
+        self.names = {'shreyas': '1', 'jackson': '3', 'hang': '4'}
         self.refreshScroll(self.names)
-        self.name.clear()
-        self.savedNames()
 
-    def refreshScroll(self, names):
-        for i in reversed(range(self.scroll_layout.count())):
-            widget_to_remove = self.scroll_layout.itemAt(i).widget()
-            if widget_to_remove is not None:
-                widget_to_remove.setParent(None)
+        
+        self.addName_button.clicked.connect(self.nameAdditon)
+        self.removeName_button.clicked.connect(self.nameRemoval)
+        self.switchButton2.clicked.connect(self.show_screen1)
 
-        for name in names:
-            name_label = QLabel(name + " - " + names[name])
-            self.scroll_layout.addWidget(name_label)
-        self.scroll_widget.adjustSize()
+        self.readNames()
+        self.spinner.names = list(self.names.keys())
+        self.spinner.update()
+        
 
+    def receive_data(self):
+        try:
+            data = self.client_socket.recv(1024).decode('utf-8')
+            if data:
+                print(f"Received: {data}")
+                self.displayName.setText(data.split(',')[0])  # Update UI with the received data
+        except BlockingIOError:
+            # No data received, keep waiting
+            return  # Just return to avoid freezing
+        except Exception as e:
+            print(f"Error receiving data: {e}")
     def startSpinner(self):
         self.spinner.names = list(self.names.keys())
         self.spinner.start_spinning()
-
-        QTimer.singleShot(random.randint(2500,4000), self.stopSpinner)
+        QTimer.singleShot(random.randint(2500, 4000), self.stopSpinner)
 
     def stopSpinner(self):
         self.spinner.stop_spinning()
-
+        sides = len(self.spinner.names)
+        angle = 360 / sides
+        right_angle = 0
+        top_right_index = int((right_angle + self.spinner.label_offset * angle) / angle) % sides
+        self.selected_name = self.spinner.names[top_right_index]
+        self.displayName.setText(self.selected_name)
         
-        sides = len(self.spinner.names)  
-        angle = 360 / sides  
-        top_right_angle = (360 / 4) % 360  
-        top_right_index = int((top_right_angle + self.spinner.label_offset * angle) / angle) % sides  
-
-        selected_name = self.spinner.names[top_right_index]
-        self.displayName.setText(selected_name)
-
+        # Update frequency count
+        self.names[self.selected_name] = str(int(self.names[self.selected_name]) + 1)
         
-        self.names[selected_name] = str(int(self.names[selected_name]) + 1)
-        self.refreshScroll(self.names)
-        self.savedNames()
-
+        # Construct the message to send
+        message = f"{self.selected_name},{self.dropdown.currentText()},{self.names[self.selected_name]}"
+        self.send_data(message)  # Call the send_data function to send the message
+    def send_data(self, message):
+        try:
+            self.client_socket.sendall(message.encode('utf-8'))
+        except Exception as e:
+            print(f"Error sending data: {e}")
 
     def savedNames(self):
         index = self.dropdown.currentIndex()
@@ -241,13 +312,50 @@ image : url('/Users/shreyas/Documents/Python/Work-in-progress projects/MATE grou
         for i in range(len(lines_k)):
             self.names[lines_k[i]] = lines_v[i]
         self.refreshScroll(self.names)
+        self.spinner.names = list(self.names.keys())
+        self.spinner.update()
 
+    def nameAdditon(self):
+        name = self.name.text().title()
+        temp_names = {name: "0"}
+        self.names.update(temp_names)
+        self.refreshScroll(self.names)
+        self.name.clear()
+        self.spinner.names = list(self.names.keys())
+        self.spinner.update()
+        self.spinner.names = list(self.names.keys())
+        self.spinner.update()
 
     def nameRemoval(self):
         name = self.name.text().title()
-        self.name.clear()
-        del self.names[name]
-        self.refreshScroll(self.names)
+        if name in self.names:
+            del self.names[name]
+            self.refreshScroll(self.names)
+            self.spinner.names = list(self.names.keys())
+            self.spinner.update()
+        self.name.clear()  # Clear the input field after removal
+
+
+    def refreshScroll(self, names):
+        for i in reversed(range(self.scroll_layout.count())):
+            widget_to_remove = self.scroll_layout.itemAt(i).widget()
+            if widget_to_remove is not None:
+                widget_to_remove.setParent(None)
+        for name in names:
+            name_label = QLabel(name + " - " + names[name])
+            self.scroll_layout.addWidget(name_label)
+        self.scroll_widget.adjustSize()
+    def closeEvent(self, event):
+        self.client_socket.close()  # Ensure socket is closed when the window is closed
+        event.accept()
+    def show_screen1(self):
+        self.main_widget.setCurrentWidget(self.screen1)
+
+    def show_screen2(self):
+        self.main_widget.setCurrentWidget(self.screen2)
+
+
+
 
 if __name__ == "__main__":
     app = QApplication([])
